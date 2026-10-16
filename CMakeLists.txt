@@ -165,6 +165,7 @@ endif()
 SET(SOURCES
   main.cpp
   AppCSXCAD.cpp
+  AppTheme.cpp
 )
 
 ADD_EXECUTABLE( AppCSXCAD ${SOURCES} )

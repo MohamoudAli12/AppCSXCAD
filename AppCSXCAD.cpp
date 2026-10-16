@@ -15,17 +15,43 @@
 *	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <QAction>
+#include <QActionGroup>
+#include <QApplication>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QStyleHints>
+#endif
 
 #include "AppCSXCAD.h"
+#include "AppTheme.h"
 
 #include "QVTKStructure.h"
 #include "QCSXCAD_Global.h"
 
+//! add one checkable theme choice to the View menu
+static void AddThemeAction(QMenu* menu, QActionGroup* group, const QString &text,
+                           AppTheme::Mode mode, AppTheme::Mode current, QObject* receiver)
+{
+	QAction* act = menu->addAction(text);
+	act->setCheckable(true);
+	act->setData((int)mode);
+	act->setChecked(mode==current);
+	group->addAction(act);
+	QObject::connect(act,SIGNAL(triggered()),receiver,SLOT(SetThemeMode()));
+}
+
 AppCSXCAD::AppCSXCAD(QWidget *parent) : QCSXCAD(parent)
 {
+	//the palette itself was already applied by AppTheme::applyStored() in main(),
+	//here we only need the values to drive the menu and the 3D view
+	m_ThemeMode = AppTheme::storedMode();
+	m_LightViewport = AppTheme::storedLightViewport();
+	m_ThemeGroup = NULL;
+	m_LightViewportAction = NULL;
+
 	QMenuBar* mb = menuBar();
 	QMenu *FileMenu = mb->addMenu("&File");
 
@@ -50,6 +76,8 @@ AppCSXCAD::AppCSXCAD(QWidget *parent) : QCSXCAD(parent)
 	FileMenu->addSeparator();
 	FileMenu->addAction(QIcon(":/images/exit.png"),tr("Exit"),qApp,SLOT(quit()));
 
+	BuildViewMenu(mb);
+
 	QMenu *InfoMenu = mb->addMenu("Info");
 	InfoMenu->addAction(tr("About"),this,SLOT(aboutQCSXCAD()));
 
@@ -68,6 +96,7 @@ AppCSXCAD::AppCSXCAD(QWidget *parent) : QCSXCAD(parent)
 		title += " - " + tr("View Mode");
 	setWindowTitle(title);
 	View3D();
+	ApplyViewportTheme();
 	LoadSettings();
 
 	parseCommandLineArguments(qApp->arguments());
@@ -76,6 +105,63 @@ AppCSXCAD::AppCSXCAD(QWidget *parent) : QCSXCAD(parent)
 AppCSXCAD::~AppCSXCAD()
 {
 	SaveSettings();
+}
+
+void AppCSXCAD::BuildViewMenu(QMenuBar* mb)
+{
+	QMenu* ViewMenu = mb->addMenu(tr("&View"));
+
+	m_ThemeGroup = new QActionGroup(this);
+	m_ThemeGroup->setExclusive(true);
+	AddThemeAction(ViewMenu,m_ThemeGroup,tr("System Theme"),AppTheme::System,m_ThemeMode,this);
+	AddThemeAction(ViewMenu,m_ThemeGroup,tr("Light Theme"),AppTheme::Light,m_ThemeMode,this);
+	AddThemeAction(ViewMenu,m_ThemeGroup,tr("Dark Theme"),AppTheme::Dark,m_ThemeMode,this);
+
+	ViewMenu->addSeparator();
+
+	//the 3D background is baked into "Export 3D view to PNG", so it needs its own switch
+	m_LightViewportAction = ViewMenu->addAction(tr("Light 3D Background"));
+	m_LightViewportAction->setCheckable(true);
+	m_LightViewportAction->setChecked(m_LightViewport);
+	connect(m_LightViewportAction,SIGNAL(toggled(bool)),this,SLOT(SetLightViewport(bool)));
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+	//follow the desktop live while "System Theme" is selected
+	connect(qApp->styleHints(),&QStyleHints::colorSchemeChanged,this,[this](Qt::ColorScheme)
+	{
+		if (m_ThemeMode!=AppTheme::System) return;
+		AppTheme::apply(AppTheme::System);
+		ApplyViewportTheme();
+	});
+#endif
+}
+
+void AppCSXCAD::SetThemeMode()
+{
+	QAction* act = qobject_cast<QAction*>(sender());
+	if (act==NULL) return;
+
+	m_ThemeMode = (AppTheme::Mode)act->data().toInt();
+	AppTheme::setStoredMode(m_ThemeMode);
+	AppTheme::apply(m_ThemeMode);
+	ApplyViewportTheme();
+}
+
+void AppCSXCAD::SetLightViewport(bool val)
+{
+	m_LightViewport = val;
+	AppTheme::setStoredLightViewport(val);
+	ApplyViewportTheme();
+}
+
+void AppCSXCAD::ApplyViewportTheme()
+{
+	if (StructureVTK==NULL) return;
+
+	if (AppTheme::isDark(m_ThemeMode) && !m_LightViewport)
+		StructureVTK->SetBackgroundColor(45,45,45);
+	else
+		StructureVTK->SetBackgroundColor(255,255,255);
 }
 
 void AppCSXCAD::parseCommandLineArguments(const QStringList &argList)

@@ -16,6 +16,7 @@
 */
 
 #include "AppCSXCAD.h"
+#include "AppTheme.h"
 
 #include "vtkCommand.h"
 #include "vtkVersion.h"
@@ -39,6 +40,9 @@ int main(int argc, char *argv[])
 	setenv("LC_NUMERIC","C",1);
 #endif
 	QApplication a(argc, argv);
+	//apply the stored theme before any widget exists, otherwise the window
+	//is briefly painted with the wrong palette
+	AppTheme::applyStored();
 	AppCSXCAD w;
 	w.show();
 	return a.exec();
